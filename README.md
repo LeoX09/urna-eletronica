@@ -8,7 +8,7 @@ Urna eletrônica baseada em Arduino. Os votos são registrados por botões físi
 
 2. O Arduino guarda a contagem por cadidato na EEPROM, então os votos não se perdem se a alimentação de energia cair.
 
-3. O Arduino envia a contagem pelo módulo HC-05
+3. O Arduino envia a contagem pelo módulo HC-05 e configuação da urna, como modo municipal e federal
 
 4. Um script Python no notebook lê essa linha pela porta serial Bluetooth e expõe os dados em um endpoit (Flask).
 
@@ -21,6 +21,7 @@ Urna eletrônica baseada em Arduino. Os votos são registrados por botões físi
 - SoftwareSerial
 - EEPROM
 - LiquidCrystal_I2C
+- KeyPad
 
 **Ponte (Maquina)**
 - Python (pyserial)
@@ -36,3 +37,10 @@ Urna eletrônica baseada em Arduino. Os votos são registrados por botões físi
 - Módulo Bluetooth HC-05
 - LCD 16x2 + Conversor I2C
 - Teclado Matricial 3X4
+- Buzzer
+
+## Comandos Bluetooh
+
+`INICIAR` -> Abre votação Municipal/Federal
+`ENCERRAR` -> Fecha a votação
+`RESULTADO` -> Devolve a contagem dos votos

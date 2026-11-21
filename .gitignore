@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# TEMPORARIO: ainda nao publicar (remover estas linhas quando for subir)
+/web/
+/servidor.py
+/urna_io.py
+/simular_votos.py
+/exemplo_urna.json
