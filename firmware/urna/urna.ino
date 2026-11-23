@@ -3,18 +3,17 @@
 #include <SoftwareSerial.h>
 
 Adafruit_LiquidCrystal lcd(0);
-SoftwareSerial bt(3, A3); // RX, TX (Alterar na forma que necessário)
+SoftwareSerial bt(3, A3); // RX, TX
 
-// Classe que retornar as saídas no bluetooth e no monitor serial
-class SaidaDupla : public Print { // Classe SD herda tudo da classe Print
+// Classe que retorna as saídas no bluetooth e no monitor serial
+class SaidaDupla : public Print {
   public:
     size_t write(uint8_t b) override {
-      Serial.write(b); // -> Envia para o computador
-      return bt.write(b); // -> Envia pro bluetooth
+      Serial.write(b);
+      return bt.write(b);
     }
 };
 
-// Objeto saída que vai ser usada no lugar do Serial
 SaidaDupla saida;
 
 const byte LINHAS = 4;
@@ -63,58 +62,140 @@ enum Estado : byte {
 
 Estado estado = AGUARDANDO_CONFIG;
 
-// Modo e dígitos
-const byte TAM_MAX = 6;
-const byte DIGITOS_MUNICIPAL = 2;
-const byte DIGITOS_FEDERAL = 4;
+const byte MAX_CANDIDATOS = 38;
+const byte TAM_NUM = 5;     // Máximo 5 dígitos
+const byte TAM_NOME = 16;   // Tamanho máximo até o comprimento do LCD
+const byte MAGIC = 0xA7;    // Nova assinatura para estrutura com 5 etapas
 
-char modo = ' ';
-byte digitos = 0;
-
-char numero[TAM_MAX + 1] = "";
-byte qtd = 0;
-bool aguardandoConfirmacao = false;
-
-// Contador em RAM
-unsigned int totalVotos = 0;
-unsigned int totalBrancos = 0;
-
-const byte MAGIC = 0xA5;
-
-struct Registro {
+struct Cabecalho {
   byte magic;
   byte estado;
   char modo;
-  byte digitos;
-  uint16_t totalVotos;
-  uint16_t totalBrancos;
+  byte totalCandidatos;
+  uint16_t totalEleitores;
+  uint16_t brancos[5];    // Cada cargo vai ter sua quantidade de branco
+  uint16_t nulos[5];      // E nulos
 };
 
+struct Candidato {
+  char cargo;               // 'V', 'P', 'F', 'E', 'S', 'G', 'R'
+  char numero[TAM_NUM + 1];
+  char nome[TAM_NOME + 1];
+  uint16_t votos;           // Qtd de votos de cada candidato
+};
+
+// Variáveis na RAM
+char modo = ' ';
+byte totalCandidatos = 0;
+uint16_t totalEleitores = 0;
+uint16_t brancos[5] = {0, 0, 0, 0, 0};
+uint16_t nulos[5] = {0, 0, 0, 0, 0};
+
+// Controle de votação do eleitor atual
+byte etapaAtual = 0;
+char numero[TAM_NUM + 1] = "";
+byte qtd = 0;
+int8_t candidatoAtualIdx = -1;
+int8_t votosPendentes[5] = {-1, -1, -1, -1, -1};
+
+// Função que vai retornar a quantidade de cargos por modo
+byte totalEtapas() {
+  if (modo == 'M') return 2;  // Vereador, Prefeito
+  if (modo == 'F') return 5;  // Dep. Federal, Dep. Estadual, Senador, Governador, Presidente
+  return 0;
+}
+
+char cargoDaEtapa(byte etapa) {
+  if (modo == 'M') {
+    return (etapa == 0) ? 'V' : 'P';
+  }
+  const char cargosFed[5] = {'F', 'E', 'S', 'G', 'R'};
+  return cargosFed[etapa];
+}
+
+byte digitosDaEtapa(byte etapa) {
+  char cargo = cargoDaEtapa(etapa);
+  if (cargo == 'V' || cargo == 'E') return 5;
+  if (cargo == 'F') return 4;
+  if (cargo == 'S') return 3;
+  return 2;   // 'P', 'G', 'R'
+}
+
+bool cargoValidoParaModo(char c) {
+  if (modo == 'M') return (c == 'V' || c == 'P');
+  if (modo == 'F') return (c == 'F' || c == 'E' || c == 'S' || c == 'G' || c == 'R');
+  return false;
+}
+
+// Retorna o texto do cargo para o LCD
+const __FlashStringHelper* labelCargoLCD(char cargo) {
+  switch (cargo) {
+    case 'V': return F("Vereador: ");
+    case 'P': return F("Prefeito: ");
+    case 'F': return F("Dep. Fed.: ");
+    case 'E': return F("Dep. Est.: ");
+    case 'S': return F("Senador: ");
+    case 'G': return F("Governador: ");
+    case 'R': return F("Presidente: ");
+  }
+  return F("Votos: ");
+}
+
+// Calcula a coluna inicial dos dígitos de acordo com o tamanho do rótulo
+byte colunaInicialLCD(char cargo) {
+  if (cargo == 'S') return 9;                  // "Senador: " (9 chars)
+  if (cargo == 'V' || cargo == 'P') return 10; // "Vereador: " / "Prefeito: " (10 chars)
+  if (cargo == 'F' || cargo == 'E') return 11; // "Dep. Fed.: " / "Dep. Est.: " (11 chars)
+  return 12;                                   // "Governador: " / "Presidente: " (12 chars)
+}
+
+int enderecoCandidato(byte idx) {
+  return sizeof(Cabecalho) + (idx * sizeof(Candidato));
+}
+
 bool carregarEEPROM() {
-  Registro reg;
-  EEPROM.get(0, reg);
+  Cabecalho cab;
+  EEPROM.get(0, cab);
 
-  if (reg.magic != MAGIC) return false;
-  if (reg.estado > ENCERRADA) return false;
+  if (cab.magic != MAGIC) return false;
+  if (cab.estado > ENCERRADA) return false;
+  if (cab.totalCandidatos > MAX_CANDIDATOS) return false;
 
-  estado = (Estado)reg.estado;
-  modo = reg.modo;
-  digitos = reg.digitos;
-  totalVotos = reg.totalVotos;
-  totalBrancos = reg.totalBrancos;
+  estado = (Estado)cab.estado;
+  modo = cab.modo;
+  totalCandidatos = cab.totalCandidatos;
+  totalEleitores = cab.totalEleitores;
+  for (byte i = 0; i < 5; i++) {
+    brancos[i] = cab.brancos[i];
+    nulos[i] = cab.nulos[i];
+  }
   return true;
 }
 
 void salvarEEPROM() {
-  Registro reg;
-  reg.magic = MAGIC;
-  reg.estado = (estado == LIBERADA) ? BLOQUEADA : estado;
-  reg.modo = modo;
-  reg.digitos = digitos;
-  reg.totalVotos = totalVotos;
-  reg.totalBrancos = totalBrancos;
+  Cabecalho cab;
+  cab.magic = MAGIC;
+  cab.estado = (estado == LIBERADA) ? BLOQUEADA : estado;
+  cab.modo = modo;
+  cab.totalCandidatos = totalCandidatos;
+  cab.totalEleitores = totalEleitores;
+  for (byte i = 0; i < 5; i++) {
+    cab.brancos[i] = brancos[i];
+    cab.nulos[i] = nulos[i];
+  }
 
-  EEPROM.put(0, reg);
+  EEPROM.put(0, cab);
+}
+
+// Algoritmo de busca na memória do arduino
+int8_t buscarCandidatoEEPROM(char cargo, const char* num, Candidato &destino) {
+  for (byte i = 0; i < totalCandidatos; i++) {
+    EEPROM.get(enderecoCandidato(i), destino);
+    if (destino.cargo == cargo && strcmp(destino.numero, num) == 0) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 // Leitura do teclado
@@ -194,7 +275,7 @@ void atualizarLeds() {
       definirLeds(LED_OFF, LED_OFF, LED_ON);
       break;
     case LIBERADA:
-      definirLeds(aguardandoConfirmacao ? LED_PISCA : LED_ON, LED_OFF, LED_OFF);
+      definirLeds((qtd == digitosDaEtapa(etapaAtual)) ? LED_PISCA : LED_ON, LED_OFF, LED_OFF);
       break;
     case ENCERRADA:
       definirLeds(LED_OFF, LED_OFF, LED_PISCA);
@@ -238,12 +319,14 @@ const __FlashStringHelper* nomeEstado(byte e) {
 }
 
 void telaDigitando() {
+  char cargo = cargoDaEtapa(etapaAtual);
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Seu voto:");
+  lcd.print(labelCargoLCD(cargo));
   qtd = 0;
   numero[0] = '\0';
-  aguardandoConfirmacao = false;
+  candidatoAtualIdx = -1;
+  atualizarLeds();
 }
 
 void mostrarTela() {
@@ -252,26 +335,27 @@ void mostrarTela() {
 
   switch (estado) {
     case AGUARDANDO_CONFIG:
-      lcd.print("Urna Sem Modo");
+      lcd.print(F("Urna Sem Modo"));
       lcd.setCursor(0, 1);
-      lcd.print("Aguardando..");
+      lcd.print(F("Aguardando.."));
       break;
     case PRONTA:
-      lcd.print("MODO: ");
-      lcd.print(modo == 'M' ? "Municipal" : "Federal");
+      lcd.print(F("MODO: "));
+      lcd.print(modo == 'M' ? F("Municipal") : F("Federal"));
       lcd.setCursor(0, 1);
-      lcd.print("Aguard. abertura");
+      lcd.print(F("Cand: "));
+      lcd.print(totalCandidatos);
       break;
     case BLOQUEADA:
-      lcd.print("Aguardando");
+      lcd.print(F("Aguardando"));
       lcd.setCursor(0, 1);
-      lcd.print("liberacao");
+      lcd.print(F("liberacao"));
       break;
     case ENCERRADA:
-      lcd.print("Votacao fechada");
+      lcd.print(F("Votacao fechada"));
       lcd.setCursor(0, 1);
-      lcd.print("Votos: ");
-      lcd.print(totalVotos);
+      lcd.print(F("Eleitores: "));
+      lcd.print(totalEleitores);
       break;
     default:
       break;
@@ -283,6 +367,7 @@ void setEstado(byte novo) {
   salvarEEPROM();
 
   if (estado == LIBERADA) {
+    etapaAtual = 0;
     telaDigitando();
   } else {
     mostrarTela();
@@ -301,21 +386,66 @@ void erroComando() {
   iniciarErroLed();
 }
 
-void processarComando(char c) {
+// Cadastro de candidatos: faz o cadastro na memória do arduino
+void cadastrarCandidato(Stream &canal) {
+  char linha[36];
+  byte len = canal.readBytesUntil('\n', linha, sizeof(linha) - 1);
+  linha[len] = '\0';
+
+  // Remove \r ou espaços finais
+  while (len > 0 && (linha[len - 1] == '\r' || linha[len - 1] == ' ')) {
+    linha[--len] = '\0';
+  }
+
+  if (estado != PRONTA || totalCandidatos >= MAX_CANDIDATOS) {
+    erroComando();
+    return;
+  }
+
+  char* virgula2 = strchr(linha + 2, ',');
+  if (linha[1] != ',' || virgula2 == NULL) {
+    erroComando();
+    return;
+  }
+
+  *virgula2 = '\0';
+
+  Candidato temp;
+  temp.cargo = toupper(linha[0]);
+  strncpy(temp.numero, linha + 2, TAM_NUM);
+  temp.numero[TAM_NUM] = '\0';
+  strncpy(temp.nome, virgula2 + 1, TAM_NOME);
+  temp.nome[TAM_NOME] = '\0';
+  temp.votos = 0;
+
+  EEPROM.put(enderecoCandidato(totalCandidatos), temp);
+  totalCandidatos++;
+  salvarEEPROM();
+  mostrarTela();
+
+  saida.print(F("OK CANDIDATO:"));
+  saida.println(temp.numero);
+}
+
+void processarComando(char c, Stream &canal) {
   switch (c) {
     case 'M':
     case 'F':
       if (estado == AGUARDANDO_CONFIG || estado == PRONTA) {
         modo = c;
-        digitos = (c == 'M') ? DIGITOS_MUNICIPAL : DIGITOS_FEDERAL;
+        totalCandidatos = 0;
+        totalEleitores = 0;
+        for (byte i = 0; i < 5; i++) { brancos[i] = 0; nulos[i] = 0; }
         saida.print(F("OK MODO:"));
-        saida.print(modo);
-        saida.print(F(" DIGITOS:"));
-        saida.println(digitos);
+        saida.println(modo);
         setEstado(PRONTA);
       } else {
         erroComando();
       }
+      break;
+
+    case 'P':
+      cadastrarCandidato(canal);
       break;
 
     case 'A':
@@ -348,9 +478,7 @@ void processarComando(char c) {
     case 'E':
       if (estado == BLOQUEADA) {
         saida.print(F("OK ENCERRAR TOTAL:"));
-        saida.print(totalVotos);
-        saida.print(F(" BRANCOS:"));
-        saida.println(totalBrancos);
+        saida.println(totalEleitores);
         setEstado(ENCERRADA);
       } else {
         erroComando();
@@ -362,13 +490,33 @@ void processarComando(char c) {
         saida.println(F("RESULTADO"));
         saida.print(F("MODO:"));
         saida.println(modo);
-        saida.print(F("DIGITOS:"));
-        saida.println(digitos);
-        saida.print(F("VOTOS:"));
-        saida.println(totalVotos);
-        saida.print(F("BRANCOS:"));
-        saida.println(totalBrancos);
-        saida.println(F("FIM"));     // -> marca o fim para o python saber quando parar de ler
+        saida.print(F("ELEITORES:"));
+        saida.println(totalEleitores);
+
+        Candidato temp;
+        for (byte e = 0; e < totalEtapas(); e++) {
+          char cargo = cargoDaEtapa(e);
+          saida.print(F("CARGO:"));
+          saida.println(cargo);
+
+          for (byte i = 0; i < totalCandidatos; i++) {
+            EEPROM.get(enderecoCandidato(i), temp);
+            if (temp.cargo == cargo) {
+              saida.print(temp.numero);
+              saida.print(F(" - "));
+              saida.print(temp.nome);
+              saida.print(F(": "));
+              saida.println(temp.votos);
+            }
+          }
+
+          saida.print(F("BRANCOS:"));
+          saida.println(brancos[e]);
+          saida.print(F("NULOS:"));
+          saida.println(nulos[e]);
+        }
+
+        saida.println(F("FIM"));
       } else {
         erroComando();
       }
@@ -377,9 +525,9 @@ void processarComando(char c) {
     case 'Z':
       if (estado == ENCERRADA) {
         modo = ' ';
-        digitos = 0;
-        totalVotos = 0;
-        totalBrancos = 0;
+        totalCandidatos = 0;
+        totalEleitores = 0;
+        for (byte i = 0; i < 5; i++) { brancos[i] = 0; nulos[i] = 0; }
         saida.println(F("OK ZERAR"));
         setEstado(AGUARDANDO_CONFIG);
       } else {
@@ -392,12 +540,10 @@ void processarComando(char c) {
       saida.print(nomeEstado(estado));
       saida.print(F(" MODO:"));
       saida.print(modo);
-      saida.print(F(" DIGITOS:"));
-      saida.print(digitos);
-      saida.print(F(" VOTOS:"));
-      saida.print(totalVotos);
-      saida.print(F(" BRANCOS:"));
-      saida.println(totalBrancos);
+      saida.print(F(" CANDIDATOS:"));
+      saida.print(totalCandidatos);
+      saida.print(F(" ELEITORES:"));
+      saida.println(totalEleitores);
       break;
 
     default:
@@ -407,73 +553,105 @@ void processarComando(char c) {
   }
 }
 
-void tratarVoto() {
-  char tecla = lerTeclado();
+void avancarEtapa() {
+  etapaAtual++;
 
-  if (tecla >= '0' && tecla <= '9' && qtd < digitos) {
+  if (etapaAtual < totalEtapas()) {
+    tocarBipeIntermediario();
+    telaDigitando();
+    return;
+  }
+
+  // Concluiu todos os cargos: grava todos os votos na memória
+  Candidato temp;
+  for (byte e = 0; e < totalEtapas(); e++) {
+    int8_t escolha = votosPendentes[e];
+    if (escolha == -2) {
+      brancos[e]++;
+    } else if (escolha == -1) {
+      nulos[e]++;
+    } else if (escolha >= 0) {
+      EEPROM.get(enderecoCandidato(escolha), temp);
+      temp.votos++;
+      EEPROM.put(enderecoCandidato(escolha), temp);
+    }
+  }
+
+  totalEleitores++;
+  salvarEEPROM();
+
+  saida.println(F("VOTO OK"));
+  lcd.clear();
+  lcd.setCursor(6, 0);
+  lcd.print(F("FIM"));
+  definirLeds(LED_ON, LED_OFF, LED_OFF);
+  aplicarLeds();
+  tocarBuzzer();
+  delay(1000);
+  setEstado(BLOQUEADA);
+}
+
+void tratarVoto() {
+  char cargo = cargoDaEtapa(etapaAtual);
+  byte digEsperados = digitosDaEtapa(etapaAtual);
+  byte colBase = colunaInicialLCD(cargo);
+
+  char tecla = lerTeclado();
+  if (tecla >= '0' && tecla <= '9' && qtd < digEsperados) {
     numero[qtd] = tecla;
-    lcd.setCursor(qtd, 1);
+    lcd.setCursor(colBase + qtd, 0);
     lcd.print(tecla);
     qtd++;
     numero[qtd] = '\0';
+
+    // Ao completar os dígitos esperados, busca o candidato na EEPROM e mostra o seu nome
+    if (qtd == digEsperados) {
+      Candidato temp;
+      candidatoAtualIdx = buscarCandidatoEEPROM(cargo, numero, temp);
+      lcd.setCursor(0, 1);
+      if (candidatoAtualIdx >= 0) {
+        lcd.print(temp.nome);
+      } else {
+        lcd.print(F("VOTO NULO"));
+      }
+      atualizarLeds();
+    }
   }
 
   if (apertou(BTN_CORRIGE)) {
     telaDigitando();
-    atualizarLeds();
   }
 
   if (apertou(BTN_BRANCO)) {
-    totalVotos++;
-    totalBrancos++;
-    salvarEEPROM();
-    saida.println(F("VOTO OK"));
+    votosPendentes[etapaAtual] = -2;
     lcd.clear();
-    lcd.print("Voto em BRANCO");
-    definirLeds(LED_ON, LED_OFF, LED_OFF);
-    aplicarLeds();
-    tocarBuzzer();
-    delay(1000);
-    setEstado(BLOQUEADA);
+    lcd.print(F("Voto em BRANCO"));
+    delay(600);
+    avancarEtapa();
     return;
   }
 
-  if (apertou(BTN_CONFIRMA) && qtd == digitos) {
-    if (!aguardandoConfirmacao) {
-      aguardandoConfirmacao = true;
-      totalVotos++;
-      salvarEEPROM();
-      saida.println(F("VOTO OK"));
-      atualizarLeds();
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Voto computado!");
-      lcd.setCursor(0, 1);
-      lcd.print("Numero: ");
-      lcd.print(numero);
-      definirLeds(LED_ON, LED_OFF, LED_OFF);
-      aplicarLeds();
-      tocarBuzzer();
-      delay(1000);
-      setEstado(BLOQUEADA);
-    }
+  if (apertou(BTN_CONFIRMA) && qtd == digEsperados) {
+    votosPendentes[etapaAtual] = candidatoAtualIdx;
+    avancarEtapa();
   }
 }
 
 // Função para ler o canal USB e Bluetooth
-void lerCanal (Stream &canal) {
+void lerCanal(Stream &canal) {
   while (canal.available() > 0) {
     char c = canal.read();
     if (c == '\n' || c == '\r' || c == ' ') continue;
-    processarComando(toupper(c));
+    processarComando(toupper(c), canal);
   }
 }
 
 void setup() {
   Serial.begin(9600);
+  Serial.setTimeout(100);
   bt.begin(9600);
+  bt.setTimeout(100);
 
-  // Modo de pino do teclado pode ser alterado caso volte a usar a lib keypad
   for (byte l = 0; l < LINHAS; l++) {
     pinMode(pinosLinhas[l], OUTPUT);
     digitalWrite(pinosLinhas[l], HIGH);
@@ -494,17 +672,17 @@ void setup() {
   lcd.begin(16, 2);
   lcd.setBacklight(1);
 
-  Serial.println(F("Comandos: M F A L C E Z S"));
+  Serial.println(F("Comandos: M F P<cargo,num,nome> A L C E R Z S"));
 
   if (carregarEEPROM()) {
-      Serial.print(F("EEPROM: recuperado ESTADO:"));
-      Serial.print(nomeEstado(estado));
-      Serial.print(F(" VOTOS:"));
-      Serial.print(totalVotos);
-      Serial.print(F(" BRANCOS"));
-      Serial.println(totalBrancos);
+    Serial.print(F("EEPROM: recuperado ESTADO:"));
+    Serial.print(nomeEstado(estado));
+    Serial.print(F(" CAND:"));
+    Serial.print(totalCandidatos);
+    Serial.print(F(" ELEITORES:"));
+    Serial.println(totalEleitores);
   } else {
-    Serial.println(F("EEPROM: vazia ou invalida, iniciado do zero"));
+    Serial.println(F("EEPROM: vazia ou invalida, iniciando do zero"));
   }
 
   setEstado(estado);
