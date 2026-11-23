@@ -1,7 +1,21 @@
 #include <Adafruit_LiquidCrystal.h>
 #include <EEPROM.h>
+#include <SoftwareSerial.h>
 
 Adafruit_LiquidCrystal lcd(0);
+SoftwareSerial bt(3, A3); // RX, TX (Alterar na forma que necessário)
+
+// Classe que retornar as saídas no bluetooth e no monitor serial
+class SaidaDupla : public Print { // Classe SD herda tudo da classe Print
+  public:
+    size_t write(uint8_t b) override {
+      Serial.write(b); // -> Envia para o computador
+      return bt.write(b); // -> Envia pro bluetooth
+    }
+};
+
+// Objeto saída que vai ser usada no lugar do Serial
+SaidaDupla saida;
 
 const byte LINHAS = 4;
 const byte COLUNAS = 3;
@@ -277,13 +291,13 @@ void setEstado(byte novo) {
   atualizarLeds();
   aplicarLeds();
 
-  Serial.print(F("ESTADO:"));
-  Serial.println(nomeEstado(estado));
+  saida.print(F("ESTADO:"));
+  saida.println(nomeEstado(estado));
 }
 
 void erroComando() {
-  Serial.print(F("ERRO: Comando Invalido no estado "));
-  Serial.println(nomeEstado(estado));
+  saida.print(F("ERRO: Comando Invalido no estado "));
+  saida.println(nomeEstado(estado));
   iniciarErroLed();
 }
 
@@ -294,10 +308,10 @@ void processarComando(char c) {
       if (estado == AGUARDANDO_CONFIG || estado == PRONTA) {
         modo = c;
         digitos = (c == 'M') ? DIGITOS_MUNICIPAL : DIGITOS_FEDERAL;
-        Serial.print(F("OK MODO:"));
-        Serial.print(modo);
-        Serial.print(F(" DIGITOS:"));
-        Serial.println(digitos);
+        saida.print(F("OK MODO:"));
+        saida.print(modo);
+        saida.print(F(" DIGITOS:"));
+        saida.println(digitos);
         setEstado(PRONTA);
       } else {
         erroComando();
@@ -306,7 +320,7 @@ void processarComando(char c) {
 
     case 'A':
       if (estado == PRONTA) {
-        Serial.println(F("OK ABRIR"));
+        saida.println(F("OK ABRIR"));
         setEstado(BLOQUEADA);
       } else {
         erroComando();
@@ -315,7 +329,7 @@ void processarComando(char c) {
 
     case 'L':
       if (estado == BLOQUEADA) {
-        Serial.println(F("OK LIBERAR"));
+        saida.println(F("OK LIBERAR"));
         setEstado(LIBERADA);
       } else {
         erroComando();
@@ -324,7 +338,7 @@ void processarComando(char c) {
 
     case 'C':
       if (estado == LIBERADA) {
-        Serial.println(F("OK CANCELAR"));
+        saida.println(F("OK CANCELAR"));
         setEstado(BLOQUEADA);
       } else {
         erroComando();
@@ -333,11 +347,28 @@ void processarComando(char c) {
 
     case 'E':
       if (estado == BLOQUEADA) {
-        Serial.print(F("OK ENCERRAR TOTAL:"));
-        Serial.print(totalVotos);
-        Serial.print(F(" BRANCOS:"));
-        Serial.println(totalBrancos);
+        saida.print(F("OK ENCERRAR TOTAL:"));
+        saida.print(totalVotos);
+        saida.print(F(" BRANCOS:"));
+        saida.println(totalBrancos);
         setEstado(ENCERRADA);
+      } else {
+        erroComando();
+      }
+      break;
+
+    case 'R':   // Envia os dados guardados, só com a urna encerrada
+      if (estado == ENCERRADA) {
+        saida.println(F("RESULTADO"));
+        saida.print(F("MODO:"));
+        saida.println(modo);
+        saida.print(F("DIGITOS:"));
+        saida.println(digitos);
+        saida.print(F("VOTOS:"));
+        saida.println(totalVotos);
+        saida.print(F("BRANCOS:"));
+        saida.println(totalBrancos);
+        saida.println(F("FIM"));     // -> marca o fim para o python saber quando parar de ler
       } else {
         erroComando();
       }
@@ -349,7 +380,7 @@ void processarComando(char c) {
         digitos = 0;
         totalVotos = 0;
         totalBrancos = 0;
-        Serial.println(F("OK ZERAR"));
+        saida.println(F("OK ZERAR"));
         setEstado(AGUARDANDO_CONFIG);
       } else {
         erroComando();
@@ -357,20 +388,20 @@ void processarComando(char c) {
       break;
 
     case 'S':
-      Serial.print(F("STATUS ESTADO:"));
-      Serial.print(nomeEstado(estado));
-      Serial.print(F(" MODO:"));
-      Serial.print(modo);
-      Serial.print(F(" DIGITOS:"));
-      Serial.print(digitos);
-      Serial.print(F(" VOTOS:"));
-      Serial.print(totalVotos);
-      Serial.print(F(" BRANCOS:"));
-      Serial.println(totalBrancos);
+      saida.print(F("STATUS ESTADO:"));
+      saida.print(nomeEstado(estado));
+      saida.print(F(" MODO:"));
+      saida.print(modo);
+      saida.print(F(" DIGITOS:"));
+      saida.print(digitos);
+      saida.print(F(" VOTOS:"));
+      saida.print(totalVotos);
+      saida.print(F(" BRANCOS:"));
+      saida.println(totalBrancos);
       break;
 
     default:
-      Serial.println(F("ERRO: Comando desconhecido"));
+      saida.println(F("ERRO: Comando desconhecido"));
       iniciarErroLed();
       break;
   }
@@ -396,7 +427,7 @@ void tratarVoto() {
     totalVotos++;
     totalBrancos++;
     salvarEEPROM();
-    Serial.println(F("VOTO OK"));
+    saida.println(F("VOTO OK"));
     lcd.clear();
     lcd.print("Voto em BRANCO");
     definirLeds(LED_ON, LED_OFF, LED_OFF);
@@ -412,6 +443,7 @@ void tratarVoto() {
       aguardandoConfirmacao = true;
       totalVotos++;
       salvarEEPROM();
+      saida.println(F("VOTO OK"));
       atualizarLeds();
       lcd.clear();
       lcd.setCursor(0, 0);
@@ -428,9 +460,20 @@ void tratarVoto() {
   }
 }
 
+// Função para ler o canal USB e Bluetooth
+void lerCanal (Stream &canal) {
+  while (canal.available() > 0) {
+    char c = canal.read();
+    if (c == '\n' || c == '\r' || c == ' ') continue;
+    processarComando(toupper(c));
+  }
+}
+
 void setup() {
   Serial.begin(9600);
+  bt.begin(9600);
 
+  // Modo de pino do teclado pode ser alterado caso volte a usar a lib keypad
   for (byte l = 0; l < LINHAS; l++) {
     pinMode(pinosLinhas[l], OUTPUT);
     digitalWrite(pinosLinhas[l], HIGH);
@@ -452,15 +495,24 @@ void setup() {
   lcd.setBacklight(1);
 
   Serial.println(F("Comandos: M F A L C E Z S"));
-  setEstado(AGUARDANDO_CONFIG);
+
+  if (carregarEEPROM()) {
+      Serial.print(F("EEPROM: recuperado ESTADO:"));
+      Serial.print(nomeEstado(estado));
+      Serial.print(F(" VOTOS:"));
+      Serial.print(totalVotos);
+      Serial.print(F(" BRANCOS"));
+      Serial.println(totalBrancos);
+  } else {
+    Serial.println(F("EEPROM: vazia ou invalida, iniciado do zero"));
+  }
+
+  setEstado(estado);
 }
 
 void loop() {
-  while (Serial.available() > 0) {
-    char c = Serial.read();
-    if (c == '\n' || c == '\r' || c == ' ') continue;
-    processarComando(toupper(c));
-  }
+  lerCanal(Serial);
+  lerCanal(bt);
 
   if (estado == LIBERADA) {
     tratarVoto();
