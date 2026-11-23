@@ -1,4 +1,5 @@
 #include <Adafruit_LiquidCrystal.h>
+#include <EEPROM.h>
 
 Adafruit_LiquidCrystal lcd(0);
 
@@ -63,6 +64,44 @@ bool aguardandoConfirmacao = false;
 // Contador em RAM
 unsigned int totalVotos = 0;
 unsigned int totalBrancos = 0;
+
+const byte MAGIC = 0xA5;
+
+struct Registro {
+  byte magic;
+  byte estado;
+  char modo;
+  byte digitos;
+  uint16_t totalVotos;
+  uint16_t totalBrancos;
+};
+
+bool carregarEEPROM() {
+  Registro reg;
+  EEPROM.get(0, reg);
+
+  if (reg.magic != MAGIC) return false;
+  if (reg.estado > ENCERRADA) return false;
+
+  estado = (Estado)reg.estado;
+  modo = reg.modo;
+  digitos = reg.digitos;
+  totalVotos = reg.totalVotos;
+  totalBrancos = reg.totalBrancos;
+  return true;
+}
+
+void salvarEEPROM() {
+  Registro reg;
+  reg.magic = MAGIC;
+  reg.estado = (estado == LIBERADA) ? BLOQUEADA : estado;
+  reg.modo = modo;
+  reg.digitos = digitos;
+  reg.totalVotos = totalVotos;
+  reg.totalBrancos = totalBrancos;
+
+  EEPROM.put(0, reg);
+}
 
 // Leitura do teclado
 char lerTeclado() {
@@ -227,6 +266,7 @@ void mostrarTela() {
 
 void setEstado(byte novo) {
   estado = (Estado)novo;
+  salvarEEPROM();
 
   if (estado == LIBERADA) {
     telaDigitando();
@@ -355,6 +395,7 @@ void tratarVoto() {
   if (apertou(BTN_BRANCO)) {
     totalVotos++;
     totalBrancos++;
+    salvarEEPROM();
     Serial.println(F("VOTO OK"));
     lcd.clear();
     lcd.print("Voto em BRANCO");
@@ -370,6 +411,7 @@ void tratarVoto() {
     if (!aguardandoConfirmacao) {
       aguardandoConfirmacao = true;
       totalVotos++;
+      salvarEEPROM();
       atualizarLeds();
       lcd.clear();
       lcd.setCursor(0, 0);
