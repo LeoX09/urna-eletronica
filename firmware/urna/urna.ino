@@ -1,11 +1,12 @@
-#include <Adafruit_LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <Keypad.h>
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 
-Adafruit_LiquidCrystal lcd(0);
-SoftwareSerial bt(3, A3); // RX, TX
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+SoftwareSerial bt(10, 11); // RX, TX
 
-// Classe que retorna as saídas no bluetooth e no monitor serial
 class SaidaDupla : public Print {
   public:
     size_t write(uint8_t b) override {
@@ -26,20 +27,21 @@ char teclas[LINHAS][COLUNAS] = {
   {'<', '0', 'c'}
 };
 
-byte pinosLinhas[LINHAS] = {13, 12, 11, 10};
-byte pinosColunas[COLUNAS] = {9, 8, 7};
-char ultimaTecla = '\0';
+// Teclado
+byte pinosLinhas[LINHAS] = {3, 8, 7, 5};
+byte pinosColunas[COLUNAS] = {4, 9, 6};
+Keypad  teclado = Keypad(makeKeymap(teclas), pinosLinhas, pinosColunas, LINHAS, COLUNAS);
 
-// Botões e buzzer
-const byte BTN_CORRIGE = A1;
-const byte BTN_BRANCO = A0;
+// Botões
+const byte BTN_CORRIGE = A0;
+const byte BTN_BRANCO = A1;
 const byte BTN_CONFIRMA = A2;
-const int PINO_BUZZER = 2;
 
-// LEDs
-const byte LED_VERMELHO = 6;
-const byte LED_AMARELO = 5;
-const byte LED_VERDE = 4;
+// LEDs e Buzzer
+const int PINO_BUZZER = 42;
+const byte LED_VERMELHO = 28;
+const byte LED_AMARELO = 32;
+const byte LED_VERDE = 34;
 
 const byte pinosLed[3] = {LED_VERDE, LED_AMARELO, LED_VERMELHO};
 enum ModoLed : byte { LED_OFF, LED_ON, LED_PISCA };
@@ -47,11 +49,9 @@ byte modoLed[3] = {LED_OFF, LED_OFF, LED_OFF};
 
 const unsigned int PERIODO_PISCA = 500;
 
-// Efeito temporário de erro
 bool erroAtivo = false;
 unsigned long erroInicio = 0;
 
-// Máquina de Estados
 enum Estado : byte {
   AGUARDANDO_CONFIG,
   PRONTA,
@@ -63,9 +63,9 @@ enum Estado : byte {
 Estado estado = AGUARDANDO_CONFIG;
 
 const byte MAX_CANDIDATOS = 38;
-const byte TAM_NUM = 5;     // Máximo 5 dígitos
-const byte TAM_NOME = 16;   // Tamanho máximo até o comprimento do LCD
-const byte MAGIC = 0xA7;    // Nova assinatura para estrutura com 5 etapas
+const byte TAM_NUM = 5;
+const byte TAM_NOME = 16;
+const byte MAGIC = 0xA7;
 
 struct Cabecalho {
   byte magic;
@@ -73,35 +73,32 @@ struct Cabecalho {
   char modo;
   byte totalCandidatos;
   uint16_t totalEleitores;
-  uint16_t brancos[5];    // Cada cargo vai ter sua quantidade de branco
-  uint16_t nulos[5];      // E nulos
+  uint16_t brancos[5];
+  uint16_t nulos[5];
 };
 
 struct Candidato {
-  char cargo;               // 'V', 'P', 'F', 'E', 'S', 'G', 'R'
+  char cargo;
   char numero[TAM_NUM + 1];
   char nome[TAM_NOME + 1];
-  uint16_t votos;           // Qtd de votos de cada candidato
+  uint16_t votos;
 };
 
-// Variáveis na RAM
 char modo = ' ';
 byte totalCandidatos = 0;
 uint16_t totalEleitores = 0;
 uint16_t brancos[5] = {0, 0, 0, 0, 0};
 uint16_t nulos[5] = {0, 0, 0, 0, 0};
 
-// Controle de votação do eleitor atual
 byte etapaAtual = 0;
 char numero[TAM_NUM + 1] = "";
 byte qtd = 0;
 int8_t candidatoAtualIdx = -1;
 int8_t votosPendentes[5] = {-1, -1, -1, -1, -1};
 
-// Função que vai retornar a quantidade de cargos por modo
 byte totalEtapas() {
-  if (modo == 'M') return 2;  // Vereador, Prefeito
-  if (modo == 'F') return 5;  // Dep. Federal, Dep. Estadual, Senador, Governador, Presidente
+  if (modo == 'M') return 2;
+  if (modo == 'F') return 5;
   return 0;
 }
 
@@ -118,7 +115,7 @@ byte digitosDaEtapa(byte etapa) {
   if (cargo == 'V' || cargo == 'E') return 5;
   if (cargo == 'F') return 4;
   if (cargo == 'S') return 3;
-  return 2;   // 'P', 'G', 'R'
+  return 2;
 }
 
 bool cargoValidoParaModo(char c) {
@@ -127,7 +124,6 @@ bool cargoValidoParaModo(char c) {
   return false;
 }
 
-// Retorna o texto do cargo para o LCD
 const __FlashStringHelper* labelCargoLCD(char cargo) {
   switch (cargo) {
     case 'V': return F("Vereador: ");
@@ -141,12 +137,11 @@ const __FlashStringHelper* labelCargoLCD(char cargo) {
   return F("Votos: ");
 }
 
-// Calcula a coluna inicial dos dígitos de acordo com o tamanho do rótulo
 byte colunaInicialLCD(char cargo) {
-  if (cargo == 'S') return 9;                  // "Senador: " (9 chars)
-  if (cargo == 'V' || cargo == 'P') return 10; // "Vereador: " / "Prefeito: " (10 chars)
-  if (cargo == 'F' || cargo == 'E') return 11; // "Dep. Fed.: " / "Dep. Est.: " (11 chars)
-  return 12;                                   // "Governador: " / "Presidente: " (12 chars)
+  if (cargo == 'S') return 9;
+  if (cargo == 'V' || cargo == 'P') return 10;
+  if (cargo == 'F' || cargo == 'E') return 11;
+  return 12;
 }
 
 int enderecoCandidato(byte idx) {
@@ -187,7 +182,6 @@ void salvarEEPROM() {
   EEPROM.put(0, cab);
 }
 
-// Algoritmo de busca na memória do arduino
 int8_t buscarCandidatoEEPROM(char cargo, const char* num, Candidato &destino) {
   for (byte i = 0; i < totalCandidatos; i++) {
     EEPROM.get(enderecoCandidato(i), destino);
@@ -196,33 +190,6 @@ int8_t buscarCandidatoEEPROM(char cargo, const char* num, Candidato &destino) {
     }
   }
   return -1;
-}
-
-// Leitura do teclado
-char lerTeclado() {
-  char teclaAtual = '\0';
-
-  for (byte l = 0; l < LINHAS; l++) {
-    digitalWrite(pinosLinhas[l], LOW);
-    for (byte c = 0; c < COLUNAS; c++) {
-      if (digitalRead(pinosColunas[c]) == LOW) {
-        teclaAtual = teclas[l][c];
-      }
-    }
-    digitalWrite(pinosLinhas[l], HIGH);
-  }
-
-  if (teclaAtual != '\0' && ultimaTecla == '\0') {
-    ultimaTecla = teclaAtual;
-    delay(20);
-    return teclaAtual;
-  }
-
-  if (teclaAtual == '\0') {
-    ultimaTecla = '\0';
-  }
-
-  return '\0';
 }
 
 bool apertou(byte pino) {
@@ -253,7 +220,7 @@ void tocarBuzzer() {
 
 void tocarBipeIntermediario() {
   tone(PINO_BUZZER, 1200);
-  delay(120);
+  delay(300);
   noTone(PINO_BUZZER);
 }
 
@@ -386,13 +353,11 @@ void erroComando() {
   iniciarErroLed();
 }
 
-// Cadastro de candidatos: faz o cadastro na memória do arduino
 void cadastrarCandidato(Stream &canal) {
   char linha[36];
   byte len = canal.readBytesUntil('\n', linha, sizeof(linha) - 1);
   linha[len] = '\0';
 
-  // Remove \r ou espaços finais
   while (len > 0 && (linha[len - 1] == '\r' || linha[len - 1] == ' ')) {
     linha[--len] = '\0';
   }
@@ -485,7 +450,7 @@ void processarComando(char c, Stream &canal) {
       }
       break;
 
-    case 'R':   // Envia os dados guardados, só com a urna encerrada
+    case 'R':
       if (estado == ENCERRADA) {
         saida.println(F("RESULTADO"));
         saida.print(F("MODO:"));
@@ -547,7 +512,10 @@ void processarComando(char c, Stream &canal) {
       break;
 
     default:
-      saida.println(F("ERRO: Comando desconhecido"));
+      saida.print(F("ERRO: Comando desconhecido 0x"));
+      saida.print((byte)c, HEX);
+      saida.print(canal.available() >= 0 && &canal == &Serial ? F(" (USB)") : F(" (BT)"));
+      saida.println();
       iniciarErroLed();
       break;
   }
@@ -562,7 +530,6 @@ void avancarEtapa() {
     return;
   }
 
-  // Concluiu todos os cargos: grava todos os votos na memória
   Candidato temp;
   for (byte e = 0; e < totalEtapas(); e++) {
     int8_t escolha = votosPendentes[e];
@@ -596,7 +563,7 @@ void tratarVoto() {
   byte digEsperados = digitosDaEtapa(etapaAtual);
   byte colBase = colunaInicialLCD(cargo);
 
-  char tecla = lerTeclado();
+  char tecla = teclado.getKey();
   if (tecla >= '0' && tecla <= '9' && qtd < digEsperados) {
     numero[qtd] = tecla;
     lcd.setCursor(colBase + qtd, 0);
@@ -604,7 +571,6 @@ void tratarVoto() {
     qtd++;
     numero[qtd] = '\0';
 
-    // Ao completar os dígitos esperados, busca o candidato na EEPROM e mostra o seu nome
     if (qtd == digEsperados) {
       Candidato temp;
       candidatoAtualIdx = buscarCandidatoEEPROM(cargo, numero, temp);
@@ -637,11 +603,11 @@ void tratarVoto() {
   }
 }
 
-// Função para ler o canal USB e Bluetooth
 void lerCanal(Stream &canal) {
   while (canal.available() > 0) {
     char c = canal.read();
     if (c == '\n' || c == '\r' || c == ' ') continue;
+    if (c < 32 || c > 126) continue;
     processarComando(toupper(c), canal);
   }
 }
@@ -652,14 +618,6 @@ void setup() {
   bt.begin(9600);
   bt.setTimeout(100);
 
-  for (byte l = 0; l < LINHAS; l++) {
-    pinMode(pinosLinhas[l], OUTPUT);
-    digitalWrite(pinosLinhas[l], HIGH);
-  }
-  for (byte c = 0; c < COLUNAS; c++) {
-    pinMode(pinosColunas[c], INPUT_PULLUP);
-  }
-
   pinMode(BTN_CORRIGE, INPUT);
   pinMode(BTN_BRANCO, INPUT);
   pinMode(BTN_CONFIRMA, INPUT);
@@ -669,8 +627,8 @@ void setup() {
     pinMode(pinosLed[i], OUTPUT);
   }
 
-  lcd.begin(16, 2);
-  lcd.setBacklight(1);
+  lcd.init();
+  lcd.backlight();
 
   Serial.println(F("Comandos: M F P<cargo,num,nome> A L C E R Z S"));
 

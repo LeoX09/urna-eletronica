@@ -1,0 +1,99 @@
+:root{
+  --bg:#e5e9e6;
+  --card:#f4f6f4;
+  --ink:#14201b;
+  --mute:#58655e;
+  --line:#c3cbc6;
+  --green:#1f7a45;
+  --orange:#d9701a;
+  --red:#c0392b;
+  --lcd:#c5dfb0;
+  --lcdink:#1d3a22;
+  --bar:#1f7a45;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:light;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#121a16;
+    --card:#1a2520;
+    --ink:#e6ede8;
+    --mute:#9aa8a0;
+    --line:#2d3b34;
+    --green:#4fbf7f;
+    --orange:#f0954a;
+    --red:#e74c3c;
+    --lcd:#9fc08a;
+    --lcdink:#15301b;
+    --bar:#4fbf7f;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Bricolage Grotesque",system-ui,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:28px 18px 56px}
+h1{font-size:clamp(28px,5vw,44px);line-height:1.08;margin:0 0 10px;letter-spacing:-.02em}
+h2{font-size:19px;margin:0 0 12px}
+h3{font-size:16px;margin:18px 0 8px;color:var(--ink)}
+.lead{max-width:65ch;color:var(--mute);margin:0 0 28px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+.wide{grid-column:1/-1}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select,input{
+  font:inherit;
+  border-radius:6px;
+  border:1px solid var(--line);
+  background:var(--bg);
+  color:var(--ink);
+  padding:8px 14px;
+}
+button{cursor:pointer;font-weight:500;transition:border-color .15s,opacity .15s}
+button:hover:not(:disabled){border-color:var(--ink)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
+button.go{background:var(--green);border-color:var(--green);color:#fff}
+button.stop{background:var(--orange);border-color:var(--orange);color:#1b1006}
+button.danger{background:var(--red);border-color:var(--red);color:#fff}
+button:disabled{opacity:.4;cursor:not-allowed}
+.hint{color:var(--mute);font-size:14px;margin:10px 0 0}
+.lcd{
+  background:var(--lcd);
+  color:var(--lcdink);
+  font:24px/1.25 "Share Tech Mono",ui-monospace,monospace;
+  padding:14px 16px;
+  border-radius:6px;
+  border:3px solid var(--line);
+  width:max-content;
+  max-width:100%;
+  white-space:pre;
+  overflow:hidden;
+}
+.stats{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:14px;color:var(--mute)}
+.stats strong{color:var(--ink);font-weight:700}
+.cand{display:grid;grid-template-columns:minmax(0,200px) 1fr 56px;gap:10px;align-items:center;margin:10px 0}
+.cand-info{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cand-info code{color:var(--mute);margin-right:6px}
+.track{height:22px;background:var(--bg);border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+.fill{height:100%;background:var(--bar);width:0;transition:width .4s}
+.fill.neutral{background:var(--mute)}
+@media(prefers-reduced-motion:reduce){.fill{transition:none}}
+.num{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:14px;border:1px solid var(--line);font-weight:500}
+.badge.on{background:var(--green);color:#fff;border-color:var(--green)}
+.badge.warn{background:var(--orange);color:#1b1006;border-color:var(--orange)}
+#log{
+  font:14px/1.45 "Share Tech Mono",ui-monospace,monospace;
+  height:220px;
+  overflow:auto;
+  background:var(--bg);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:10px;
+  margin:0;
+}
+.tx{color:var(--green)}.rx{color:var(--orange)}.er{color:var(--red)}
+code{font-family:"Share Tech Mono",ui-monospace,monospace;font-size:.92em}  

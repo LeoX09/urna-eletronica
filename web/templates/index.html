@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Painel Urna</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='Urna.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content:space-between;align-items:flex-start">
+    <div>
+      <h1>Urna eletrônica: painel de controle</h1>
+      <p class="lead">Interface para configuração, liberação de eleitores e apuração do Boletim de Urna.</p>
+    </div>
+    <span class="badge" id="badgeEstado">DESCONECTADA</span>
+  </div>
+
+  <div class="grid">
+    <!-- 1. CONEXÃO E MODO -->
+    <section class="card" aria-labelledby="h-conexao">
+      <h2 id="h-conexao">1. Conexão e Modo da Eleição</h2>
+      <div class="row">
+        <select id="selectPorta" aria-label="Porta Serial"></select>
+        <button onclick="carregarPortas()">Atualizar</button>
+        <button class="go" onclick="conectar()">Conectar</button>
+      </div>
+      <p class="hint">Selecione a porta USB (ex: <code>COM8</code>) ou Bluetooth pareado do Arduino Mega.</p>
+
+      <div class="row" style="margin-top:14px">
+        <button id="btnModoM" class="go" onclick="enviarCmd('M')" disabled>Modo Municipal (M)</button>
+        <button id="btnModoF" class="go" onclick="enviarCmd('F')" disabled>Modo Federal (F)</button>
+      </div>
+      <p class="hint"><code>M</code> habilita Vereador e Prefeito; <code>F</code> habilita os 5 cargos federais/estaduais.</p>
+    </section>
+
+    <!-- 2. ESPELHO DO LCD E STATUS -->
+    <section class="card" aria-labelledby="h-urna">
+      <h2 id="h-urna">2. Visor da Urna (LCD 16×2)</h2>
+      <div class="lcd" id="lcd" role="status" aria-live="polite">Urna desconectada
+Aguardando..    </div>
+      <div class="stats">
+        <span>Modo: <strong id="stModo">—</strong></span>
+        <span>Candidatos: <strong id="stCand">0 / 38</strong></span>
+        <span>Eleitores: <strong id="stEleit">0</strong></span>
+      </div>
+    </section>
+
+    <!-- 3. CADASTRO DE CANDIDATOS -->
+    <section class="card wide" aria-labelledby="h-cad">
+      <h2 id="h-cad">3. Cadastro de Candidatos</h2>
+      <form class="row" onsubmit="cadastrar(event)">
+        <select id="selCargo" onchange="ajustarDigitos()" aria-label="Cargo"></select>
+        <input id="inpNumero" type="text" placeholder="Número" required style="width:130px">
+        <input id="inpNome" type="text" maxlength="16" placeholder="Nome (máx. 16 caracteres)" required style="flex:1;min-width:220px">
+        <button id="btnCadastrar" class="go" type="submit" disabled>Cadastrar (P)</button>
+      </form>
+      <p class="hint">Envia <code>P&lt;cargo&gt;,&lt;numero&gt;,&lt;nome&gt;</code> removendo acentos automaticamente para exibição no LCD.</p>
+    </section>
+
+    <!-- 4. TERMINAL DO MESÁRIO -->
+    <section class="card wide" aria-labelledby="h-mesario">
+      <h2 id="h-mesario">4. Terminal do Mesário</h2>
+      <div class="row">
+        <button id="btnAbrir" class="stop" onclick="enviarCmd('A')" disabled>Abrir Votação (A)</button>
+        <button id="btnLiberar" class="go" onclick="enviarCmd('L')" disabled>Liberar Eleitor (L)</button>
+        <button id="btnCancelar" class="stop" onclick="enviarCmd('C')" disabled>Cancelar Voto Atual (C)</button>
+        <button id="btnEncerrar" class="danger" onclick="enviarCmd('E')" disabled>Encerrar Urna (E)</button>
+      </div>
+      <p class="hint">Após clicar em <code>Liberar Eleitor</code>, o teclado físico da urna é destravado até a conclusão do voto.</p>
+    </section>
+
+    <!-- 5. BOLETIM DE URNA / PLACAR -->
+    <section class="card wide" aria-labelledby="h-placar">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="h-placar">5. Boletim de Urna e Apuração</h2>
+        <div class="row">
+          <button id="btnApurar" class="go" onclick="apurar()" disabled>Apurar Resultados (R)</button>
+          <button id="btnZerar" class="danger" onclick="zerarUrna()" disabled>Zerar Memória (Z)</button>
+        </div>
+      </div>
+      <p class="hint" id="resumoApuracao" style="margin:4px 0 8px">Encerre a votação para liberar a leitura do comando <code>R</code>.</p>
+      <div id="areaBoletim"></div>
+    </section>
+
+    <!-- 6. CONVERSA SERIAL -->
+    <section class="card wide" aria-labelledby="h-log">
+      <h2 id="h-log">Conversa serial</h2>
+      <pre id="log" aria-live="off"></pre>
+      <p class="hint">Verde (<code>→</code>) é o comando enviado pelo Python, laranja (<code>←</code>) é a resposta do Arduino.</p>
+    </section>
+  </div>
+</main>
+
+<script src="static/script.js"></script>
+</body>
+</html>
